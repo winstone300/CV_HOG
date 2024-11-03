@@ -2,7 +2,7 @@
 #include <opencv2/opencv.hpp>
 #include <cmath>
 
-#define WINDOWSIZE_WIDTH 512
+#define WINDOWSIZE_WIDTH 256
 #define WINDOWSIZE_HEIGHT 512
 #define CELLSIZE 16
 #define BLOCKSIZE 32
@@ -19,7 +19,7 @@ float* getCell(const Mat& mag, const Mat& phase, int x, int y);
 Mat visualizeHOG(const std::vector<float>& featureVector, int cellSize, int binSize, int width, int height);
 
 int main() {
-    Mat t = imread("lena.jpg", IMREAD_GRAYSCALE);
+    Mat t = imread("people.png", IMREAD_GRAYSCALE);
     Mat scr = t.clone();
     resize(t, scr, Size(WINDOWSIZE_WIDTH, WINDOWSIZE_HEIGHT));
     if (scr.empty()) {
@@ -85,7 +85,9 @@ int main() {
         std::cout << histogram[i] << ", ";
         std::cout << descriptors[i] << std::endl;
     }
-
+    std::cout << descriptors.size() << std::endl;
+    std::cout << histogram.size() << std::endl;
+    
 
     waitKey(0);
     return 0;
@@ -164,7 +166,7 @@ void getBlock(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>
         tmp = getCell(mag, phase, x + w, y + h);
         
         // 정규화 과정
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 18; i++) {
             total = total + tmp[i] * tmp[i];
             L.push_back(tmp[i]);
         }
@@ -181,7 +183,7 @@ void getBlock(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>
 
 float* getCell(const Mat& mag,const Mat& phase, int x, int y) {
 
-    float* arr = new float[9]();
+    float* arr = new float[18]();
     int i1,i2;
     float di;
     float t;
@@ -190,7 +192,7 @@ float* getCell(const Mat& mag,const Mat& phase, int x, int y) {
         i1 = t / 20;
         di = t - i1*20;
         arr[i1] += mag.at<float>(h,w) * (20 - di) / 20;
-        i2 = (i1 + 1)%9;
+        i2 = (i1 + 1)%18;
         arr[i2] += mag.at<float>(h,w) * di / 20;
         
     }
@@ -231,7 +233,7 @@ void getMagPhase(const Mat& x, const Mat& y, Mat& mag, Mat& phase) {
 
             mag.at<float>(i, j) = sqrt(gx * gx + gy * gy);
             float angle = atan2(gy, gx) * 180 / CV_PI;  
-            phase.at<float>(i, j) = abs(angle);  
+            phase.at<float>(i, j) = angle+180;  
         }
     }
 }
