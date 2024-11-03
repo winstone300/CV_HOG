@@ -2,7 +2,7 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>C:\Users\최재민\source\repos\심전실\HOG\opencv\x64\Debug\opencv.exe</FullPath>
+      <FullPath>C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\x64\Debug\opencv.exe</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />

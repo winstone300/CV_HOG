@@ -1,5 +1,25 @@
 ﻿  opencv.cpp
-C:\Users\최재민\source\repos\심전실\HOG\opencv\opencv.cpp(116,16): warning C4244: '=': 'float'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
-C:\Users\최재민\source\repos\심전실\HOG\opencv\opencv.cpp(159,25): warning C4244: '초기화 중': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
-C:\Users\최재민\source\repos\심전실\HOG\opencv\opencv.cpp(124): warning C4172: 지역 변수 또는 임시: arr의 주소를 반환하고 있습니다.
-  opencv.vcxproj -> C:\Users\최재민\source\repos\심전실\HOG\opencv\x64\Debug\opencv.exe
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(121,29): warning C4244: '초기화 중': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(125,34): warning C4244: '인수': 'float'에서 '_Tp'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+          with
+          [
+              _Tp=int
+          ]
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(124,47): warning C4244: '인수': 'float'에서 '_Tp'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+          with
+          [
+              _Tp=int
+          ]
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(127,34): warning C4244: '인수': 'float'에서 '_Tp'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+          with
+          [
+              _Tp=int
+          ]
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(126,45): warning C4244: '인수': 'float'에서 '_Tp'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+          with
+          [
+              _Tp=int
+          ]
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(190,16): warning C4244: '=': 'float'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\opencv.cpp(233,25): warning C4244: '초기화 중': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+  opencv.vcxproj -> C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\x64\Debug\opencv.exe

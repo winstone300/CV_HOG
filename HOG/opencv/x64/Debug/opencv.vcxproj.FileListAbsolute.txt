@@ -1,2 +1,3 @@
 C:\Users\최재민\source\repos\심전실\opencv\x64\Debug\opencv.exe
 C:\Users\최재민\source\repos\심전실\HOG\opencv\x64\Debug\opencv.exe
+C:\Users\최재민\source\repos\CV_HOG\HOG\opencv\x64\Debug\opencv.exe
