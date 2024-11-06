@@ -2,7 +2,7 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>C:\Users\jglee\Desktop\HOG\x64\Debug\HOG.exe</FullPath>
+      <FullPath>C:\Users\jglee\source\repos\CV_HOG\HOG\x64\Debug\HOG.exe</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />

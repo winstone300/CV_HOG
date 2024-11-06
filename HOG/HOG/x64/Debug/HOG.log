@@ -1,4 +1,12 @@
 ﻿  main.cpp
-C:\Users\jglee\Desktop\HOG\main.cpp(178,46): warning C4244: '+=': 'double'에서 'ushort'(으)로 변환하면서 데이터가 손실될 수 있습니다.
-C:\Users\jglee\Desktop\HOG\main.cpp(179,56): warning C4244: '+=': 'double'에서 'ushort'(으)로 변환하면서 데이터가 손실될 수 있습니다.
-  HOG.vcxproj -> C:\Users\jglee\Desktop\HOG\x64\Debug\HOG.exe
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(245,46): warning C4244: '+=': 'double'에서 'ushort'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(246,56): warning C4244: '+=': 'double'에서 'ushort'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(342,41): warning C4244: '=': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(343,41): warning C4244: '=': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(352,14): warning C4244: '=': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(353,14): warning C4244: '=': 'double'에서 'float'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(355,48): warning C4244: '인수': 'float'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(355,34): warning C4244: '인수': 'float'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(361,15): warning C4244: '초기화 중': 'double'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+C:\Users\jglee\source\repos\CV_HOG\HOG\main.cpp(362,15): warning C4244: '초기화 중': 'double'에서 'int'(으)로 변환하면서 데이터가 손실될 수 있습니다.
+  HOG.vcxproj -> C:\Users\jglee\source\repos\CV_HOG\HOG\x64\Debug\HOG.exe
