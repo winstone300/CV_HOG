@@ -2,8 +2,8 @@
 #include <opencv2/opencv.hpp>
 #include <cmath>
 
-#define WINDOWSIZE_WIDTH 256
-#define WINDOWSIZE_HEIGHT 512
+#define WINDOWSIZE_WIDTH 240
+#define WINDOWSIZE_HEIGHT 320
 #define CELLSIZE 16
 #define BLOCKSIZE 32
 
@@ -17,6 +17,7 @@ void GetHistogram(const Mat& mag, const Mat& phase, std::vector<float>& hist);
 void getBlock(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>& hist);
 float* getCell(const Mat& mag, const Mat& phase, int x, int y);
 Mat visualizeHOG(const std::vector<float>& featureVector, int cellSize, int binSize, int width, int height);
+void getBlock_Hys(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>& hist);
 
 int main() {
     Mat t = imread("people.png", IMREAD_GRAYSCALE);
@@ -58,7 +59,7 @@ int main() {
     //imshow("input", t);
     //imshow("scr", scr);
     
-    Mat hogImage = visualizeHOG(histogram, CELLSIZE, 9, WINDOWSIZE_WIDTH, WINDOWSIZE_HEIGHT);
+    Mat hogImage = visualizeHOG(histogram, CELLSIZE, 18, WINDOWSIZE_WIDTH, WINDOWSIZE_HEIGHT);
     Mat combine;
     addWeighted(scr, 1.0, hogImage, 0.2, 0, combine);
     imshow("combine",combine);
@@ -69,13 +70,18 @@ int main() {
         Size(BLOCKSIZE, BLOCKSIZE),    // 블록 사이즈
         Size(CELLSIZE, CELLSIZE),      // 블록 스트라이드
         Size(CELLSIZE, CELLSIZE),      // 셀 사이즈
-        9                // 빈의 수 (각 히스토그램 방향 개수)
+        18,                // 빈의 수 (각 히스토그램 방향 개수)
+        1,                 // 히스토그램 계층의 수
+        -1,                // 가우시안 필터 시그마 (기본값)
+        HOGDescriptor::L2Hys, // 히스토그램 정규화 방법
+        0.2,               // L2-Hys 정규화 클립핑 값
+        true               // 부호 있는 그라디언트 사용 여부 (signedGradient)
     );
     std::vector<float> descriptors;
     hog.compute(scr, descriptors, Size(CELLSIZE, CELLSIZE));
     
 
-    Mat hogImage2 = visualizeHOG(descriptors, CELLSIZE, 9, WINDOWSIZE_WIDTH, WINDOWSIZE_HEIGHT);
+    Mat hogImage2 = visualizeHOG(descriptors, CELLSIZE, 18, WINDOWSIZE_WIDTH, WINDOWSIZE_HEIGHT);
     Mat combine2;
     addWeighted(scr, 1.0, hogImage2, 0.2, 0, combine2);
     imshow("opencv", combine2);
@@ -94,16 +100,16 @@ int main() {
 }
 
 
-
-
-// HOG 특징 벡터를 시각화하는 함수
 Mat visualizeHOG(const std::vector<float>& featureVector, int cellSize, int binSize, int width, int height) {
     int numCellsX = width / cellSize;
     int numCellsY = height / cellSize;
     int angleUnit = 360 / binSize;
 
     // 시각화 이미지 생성
-    Mat hogImage(height, width, CV_8UC1, Scalar(255, 255, 255));
+    Mat hogImage(height, width, CV_8UC1, Scalar(255));
+
+    // 히스토그램 값의 최대값 찾기 (정규화를 위해)
+    float maxVal = *std::max_element(featureVector.begin(), featureVector.end());
 
     int index = 0;
     for (int y = 0; y < numCellsY; y++) {
@@ -111,7 +117,7 @@ Mat visualizeHOG(const std::vector<float>& featureVector, int cellSize, int binS
             // 현재 셀의 히스토그램 가져오기
             std::vector<float> hist(binSize);
             for (int i = 0; i < binSize; i++) {
-                hist[i] = featureVector[index++];
+                hist[i] = featureVector[index++] / maxVal;  // 정규화
             }
 
             // 셀의 중심 좌표
@@ -119,27 +125,27 @@ Mat visualizeHOG(const std::vector<float>& featureVector, int cellSize, int binS
 
             // 히스토그램을 기반으로 선 그리기
             for (int bin = 0; bin < binSize; bin++) {
-                float magnitude = hist[bin];
-                float angle = bin * angleUnit * CV_PI / 180.0; // 라디안 단위로 변환
+                float magnitude = hist[bin] * cellSize / 2;  // 상대적인 크기 조정
+                float angle = bin * angleUnit * CV_PI / 180.0;  // 0~360도 각도 사용, 라디안 단위 변환
 
-                // 선의 시작점과 끝점 계산
-                Point startPoint(cellCenter.x + cos(angle) * magnitude * cellSize / 2,
-                    cellCenter.y + sin(angle) * magnitude * cellSize / 2);
-                Point endPoint(cellCenter.x - cos(angle) * magnitude * cellSize / 2,
-                    cellCenter.y - sin(angle) * magnitude * cellSize / 2);
+                // 선의 시작점과 끝점 계산 (y좌표에 주의)
+                Point startPoint(
+                    cellCenter.x + cos(angle) * magnitude,
+                    cellCenter.y - sin(angle) * magnitude
+                );
+                Point endPoint(
+                    cellCenter.x - cos(angle) * magnitude,
+                    cellCenter.y + sin(angle) * magnitude
+                );
 
-                // 선 그리기
-                line(hogImage, startPoint, endPoint, Scalar(0, 0, 255), 1);
+                // 선 그리기 (Scalar(0) 사용하여 흑백으로 표시)
+                line(hogImage, startPoint, endPoint, Scalar(0), 1);
             }
         }
     }
 
-    // 시각화된 HOG 이미지 출력
-    //imshow("HOG Visualization", hogImage);
-
     return hogImage;
 }
-
 
 void GetHistogram(const Mat& mag, const Mat& phase, std::vector<float>& hist) {
     int height = mag.rows;
@@ -148,12 +154,49 @@ void GetHistogram(const Mat& mag, const Mat& phase, std::vector<float>& hist) {
     for (int h = 0; h < height-CELLSIZE; h += CELLSIZE){
 
         for (int w = 0; w < width-CELLSIZE; w += CELLSIZE) {
-            getBlock(mag, phase, w, h, hist);
+            getBlock_Hys(mag, phase, w, h, hist);
 
         }
 
     }
 
+}
+
+void getBlock_Hys(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>& hist) {
+    std::vector<float> blockHist;
+
+    for (int h = 0; h < BLOCKSIZE; h += CELLSIZE) {
+        for (int w = 0; w < BLOCKSIZE; w += CELLSIZE) {
+            float* cellHist = getCell(mag, phase, x + w, y + h);
+            blockHist.insert(blockHist.end(), cellHist, cellHist + 18);
+            delete[] cellHist;
+        }
+    }
+
+    // L2-Hys 정규화
+    float sum = 0.0f;
+    for (float val : blockHist) {
+        sum += val * val;
+    }
+    sum = sqrt(sum + 1e-6f);  // 작은 값을 더하여 0으로 나누는 것을 방지
+
+    for (float& val : blockHist) {
+        val /= sum;
+        // 임계값 적용 (예: 0.2)
+        if (val > 0.2f) val = 0.2f;
+    }
+
+    // 다시 정규화
+    sum = 0.0f;
+    for (float val : blockHist) {
+        sum += val * val;
+    }
+    sum = sqrt(sum + 1e-6f);
+
+    for (float& val : blockHist) {
+        val /= sum;
+        hist.push_back(val);
+    }
 }
 
 void getBlock(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>& hist) {
@@ -181,22 +224,26 @@ void getBlock(const Mat& mag, const Mat& phase, int x, int y, std::vector<float>
     
 }
 
-float* getCell(const Mat& mag,const Mat& phase, int x, int y) {
-
+float* getCell(const Mat& mag, const Mat& phase, int x, int y) {
     float* arr = new float[18]();
-    int i1,i2;
-    float di;
-    float t;
-    for (int h = y; h < y+CELLSIZE; h++) for (int w = x; w < x+CELLSIZE; w++) {
-        t = phase.at<float>(h, w);
-        i1 = t / 20;
-        di = t - i1*20;
-        arr[i1] += mag.at<float>(h,w) * (20 - di) / 20;
-        i2 = (i1 + 1)%18;
-        arr[i2] += mag.at<float>(h,w) * di / 20;
-        
-    }
+    int bin1, bin2;
+    float binSize = 20.0f; // 각 빈이 커버하는 각도 범위
 
+    for (int h = y; h < y + CELLSIZE; h++) {
+        for (int w = x; w < x + CELLSIZE; w++) {
+            float angle = phase.at<float>(h, w);
+            float magnitude = mag.at<float>(h, w);
+
+            float bin = angle / binSize;
+            bin1 = static_cast<int>(bin) % 18;
+            bin2 = (bin1 + 1) % 18;
+            float binFraction = bin - bin1;
+
+            // 보간하여 히스토그램 값 누적
+            arr[bin1] += magnitude * (1 - binFraction);
+            arr[bin2] += magnitude * binFraction;
+        }
+    }
     return arr;
 }
 
@@ -232,8 +279,9 @@ void getMagPhase(const Mat& x, const Mat& y, Mat& mag, Mat& phase) {
             float gy = y.at<float>(i, j);
 
             mag.at<float>(i, j) = sqrt(gx * gx + gy * gy);
-            float angle = atan2(gy, gx) * 180 / CV_PI;  
-            phase.at<float>(i, j) = angle+180;  
+            float angle = atan2(gy, gx) * 180 / CV_PI;
+            if (angle < 0) angle += 360;  // 각도를 0~360도로 조정
+            phase.at<float>(i, j) = angle;
         }
     }
 }
