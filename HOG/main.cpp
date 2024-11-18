@@ -1,380 +1,423 @@
-﻿#include <opencv2/opencv.hpp>
+﻿#include <iostream>
+#include <filesystem>
+#include <vector>
+#include <chrono>
+#include <random>
 
-#include <cmath>
+#include "hog.hpp"
 
-//#define SHOW_PADDING
-//#define SHOW_GRADIENT
-//#define COUT_NORMALIZE_VALUE_RANGE
-
+using namespace std;
 using namespace cv;
+using namespace cv::ml;
+namespace fs = std::filesystem;
 
-void padding(const Mat& in, Mat& out, int padSize);
-void gradient(const Mat& in, Mat& out, int padSize);
-void histogramGradient(const Mat& in, Mat& out, int cellSize);
-void histNormalize(Mat& in, Mat& out);
+void objectDetect1(const Mat& img);
+void objectDetect2(const Mat& testImage);
+void svmTrain();
+void svmPred();
 
-// 데카르트 좌표계 실험
-void polarToCartesian(Mat& in, Mat& out);
-Mat gammaCorrection(const cv::Mat& input, double gamma);
+int countFilesInDirectory(const std::string& folderPath);
+void addGaussianNoise(const cv::Mat& src, cv::Mat& dst, double mean, double stddev);
 
 int main() {
-	Mat image = imread("Lena.png");
-	Mat resize_image = image.clone();
-	//resize(image, resize_image, Size(64, 128));
-	Mat padImage, gradientImage, histImage, normalizeHistImage;
+	//svmTrain();
+	//svmPred();
+	//return 0;
 
-	padding(resize_image, padImage, 1);
-	gradient(padImage, gradientImage, 1);
-	histogramGradient(gradientImage, histImage, 8);
-	histNormalize(histImage, normalizeHistImage);
+	Mat temp;
 
-#ifdef COUT_NORMALIZE_VALUE_RANGE
-	float minValue = 1, maxValue = 0;
-	for (int row = 0; row < normalizeHistImage.rows; row++) {
-		float* ptr = normalizeHistImage.ptr<float>(row);
-		for (int col = 0; col < normalizeHistImage.cols; col++) {
-			for (int i = 0; i < 9; i++) {
-				if (ptr[col * 9 + i] <= 0) {
-					std::cout << "row: " << row << "\tcol: " << col << "\tchannel: " << i << "\tvalue: " << ptr[col * 9 + i] << '\n';
-				} else if (ptr[col * 9 + i] >= 1) {
-					std::cout << "row: " << row << "\tcol: " << col << "\tchannel: " << i << "\tvalue: " << ptr[col * 9 + i] << '\n';
-				}
-				minValue = min(minValue, ptr[col * 9 + i]);
-				maxValue = max(maxValue, ptr[col * 9 + i]);
-			}
-		}
-	}
-	std::cout << minValue << ' ' << maxValue << "\n\n";
-#endif // COUT_NORMALIZE_VALUE_RANGE
-
-	//Mat cartesianImage;
-
-	//polarToCartesian(gradientImage, cartesianImage);
-
-	//imshow("img", image);
-
-	waitKey();
+	objectDetect2(temp);
 
 	return 0;
-}
 
-void padding(const Mat& in, Mat& out, int padSize) {
-	out = Mat::zeros(in.rows + 2 * padSize, in.cols + 2 * padSize, in.type());
+	//VideoCapture video("vtest.avi");
 
-	int row = in.rows, col = in.cols;
-	int channel = in.channels();
+	//int index = 0;
 
-	for (int c = 0; c < in.channels(); c++) {
+	//while (1) {
+	//	cout << "frame: " << index++ << "\n";
+	//	Mat frame;
+	//	video >> frame;
 
-		for (int y = 0; y < in.rows; y++) {
-			for (int x = 0; x < in.cols; x++) {
-				out.data[channel * ((y + padSize) * (in.cols + 2 * padSize) + (x + padSize)) + c]
-					= in.data[channel * (y * in.cols + x) + c];
-			}
-		}
-
-		for (int y = 0; y < padSize; y++) {
-			for (int x = 0; x < in.cols; x++) {
-				out.data[channel * (y * (in.cols + 2 * padSize) + (x + padSize)) + c]
-					= in.data[channel * x + c];
-				out.data[channel * ((y + padSize + in.rows) * (in.cols + 2 * padSize) + (x + padSize)) + c]
-					= in.data[channel * ((in.rows - 1) * in.cols + x) + c];
-			}
-		}
-
-		for (int y = 0; y < in.rows + 2 * padSize; y++) {
-			for (int x = 0; x < padSize; x++) {
-				out.data[channel * (y * (in.cols + 2 * padSize) + x) + c]
-					= out.data[channel * (y * (in.cols + 2 * padSize) + padSize) + c];
-				out.data[channel * (y * (in.cols + 2 * padSize) + (x + padSize + in.cols)) + c]
-					= out.data[channel * (y * (in.cols + 2 * padSize) + (padSize + in.cols - 1)) + c];
-			}
-		}
-	}
-
-#ifdef SHOW_PADDING
-	imshow("padding", out);
-	waitKey();
-	destroyAllWindows();
-#endif // SHOW_PADDING
-}
-
-void gradient(const Mat& in, Mat& out, int padSize) {
-	int row = in.rows - 2 * padSize;
-	int col = in.cols - 2 * padSize;
-	int type = in.type();
-	int channel = in.channels();
-
-	out = Mat::zeros(row, col, CV_8UC2); // 타입 동적으로 조절?
-	Mat gx = Mat::zeros(row, col, type);
-	Mat gy = Mat::zeros(row, col, type);
-	Mat magnitude = Mat::zeros(row, col, type);
-	Mat angle = Mat::zeros(row, col, type);
-
-	for (int c = 0; c < channel; c++) {
-
-		int gX, gY;
-		double degree;
-
-		for (int y = 0; y < row; y++) {
-			for (int x = 0; x < col; x++) {
-				gX = in.data[channel * ((y + padSize) * in.cols + (x + padSize + 1)) + c]
-					- in.data[channel * ((y + padSize) * in.cols + (x + padSize - 1)) + c];
-				gY = in.data[channel * ((y + padSize + 1) * in.cols + (x + padSize)) + c]
-					- in.data[channel * ((y + padSize - 1) * in.cols + (x + padSize)) + c];
-
-				gx.data[channel * (y * gx.cols + x) + c] = gX;
-				gy.data[channel * (y * gy.cols + x) + c] = gY;
-
-				magnitude.data[channel * (y * magnitude.cols + x) + c] = (uchar)sqrt(gX * gX + gY * gY);
-				degree = atan2(gY, gX) * 180 / CV_PI;
-				angle.data[channel * (y * angle.cols + x) + c] = (unsigned char)(degree < 0 ? degree + 180 : degree) % 180;
-			}
-		}
-	}
-
-	int* pixelValue = new int[channel];
-	int cIndex, maxValue;
-
-	for (int y = 0; y < row; y++) {
-		for (int x = 0; x < col; x++) {
-			cIndex = -1;
-			maxValue = -1;
-
-			for (int c = 0; c < channel; c++) {
-				pixelValue[c] = magnitude.data[channel * (y * magnitude.cols + x) + c];
-			}
-
-			for (int c = 0; c < channel; c++) {
-				if (pixelValue[c] > maxValue) {
-					maxValue = pixelValue[c];
-					cIndex = c;
-				}
-			}
-
-			if (cIndex == -1 || maxValue == -1) {
-				std::cerr << "gradient - max magnitude value is not found\n";
-				return;
-			}
-
-			out.data[2 * (y * out.cols + x) + 0] = magnitude.data[channel * (y * magnitude.cols + x) + cIndex];
-			out.data[2 * (y * out.cols + x) + 1] = angle.data[channel * (y * angle.cols + x) + cIndex];
-		}
-	}
-
-	delete[] pixelValue;
-
-#pragma region deprecated_colorGradient
-	// 컬러 영상에서만 작동
-	//for (int y = 0; y < row; y++) {
-	//	for (int x = 0; x < col; x++) {
-	//		int c = -1;
-	//		int b = magnitude.data[channel * (y * magnitude.cols + x) + 0];
-	//		int g = magnitude.data[channel * (y * magnitude.cols + x) + 1];
-	//		int r = magnitude.data[channel * (y * magnitude.cols + x) + 2];
-
-	//		if (b > g) {
-	//			if (b > r) { // b
-	//				c = 0;
-	//			} else { // r
-	//				c = 2;
-	//			}
-	//		} else {
-	//			if (g > r) { // g
-	//				c = 1;
-	//			} else { // r
-	//				c = 2;
-	//			}
-	//		}
-
-	//		if (c == -1) {
-	//			std::cerr << "gradient - max magnitude value is not found\n";
-	//			return;
-	//		}
-
-	//		out.data[2 * (y * out.cols + x) + 0] = magnitude.data[channel * (y * magnitude.cols + x) + c];
-	//		out.data[2 * (y * out.cols + x) + 1] = angle.data[channel * (y * angle.cols + x) + c];
+	//	if (frame.empty()) {
+	//		break;
 	//	}
+
+	//	objectDetect2(frame);
 	//}
-#pragma endregion
-
-#ifdef SHOW_GRADIENT
-	imshow("gx", gx);
-	imshow("gy", gy);
-	imshow("magnitude", magnitude);
-	imshow("angle", angle);
-	waitKey();
-	destroyAllWindows();
-#endif // SHOW_GRADIENT
 }
 
-void histogramGradient(const Mat& in, Mat& out, int cellSize) {
-	if (in.type() != CV_8UC2) {
-		std::cerr << "histogramGradient - input Mat type error\n";
-		return;
-	} else if (in.rows % cellSize != 0 || in.cols % cellSize != 0) {
-		std::cerr << "histogramGradient - input Mat size error\n";
+// 내가 만들었던거
+void objectDetect1(const Mat& img) {
+	if (img.empty()) {
+		std::cerr << "Error loading image" << std::endl;
 		return;
 	}
 
-	int rowCell = in.rows / cellSize, colCell = in.cols / cellSize;
+	// SVM 모델 불러오기
+	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::load("trained_svm.xml");
+	if (svm->empty()) {
+		std::cerr << "Error loading SVM model" << std::endl;
+		return;
+	}
 
-	out = Mat::zeros(rowCell, colCell, CV_16UC(9));
-	//out = Mat::zeros(rowCell, colCell, CV_32FC(9));
+	std::vector<cv::Rect> detections;
 
-	for (int row = 0; row < rowCell; row++) {
-		ushort* rowPtr = out.ptr<ushort>(row);
-		//double* rowPtr = out.ptr<double>(row);
+	double scale = 1.0;
+	Mat resizedFrame = img.clone();
+	while (resizedFrame.cols >= 64 && resizedFrame.rows >= 128) {
+		std::cout << resizedFrame.size() << ' ' << (resizedFrame.rows - 128) / 5 * (resizedFrame.cols - 64) / 5 << '\n';
+		// 슬라이딩 윈도우를 적용하여 HOG 특징 추출
+		for (int y = 0; y < resizedFrame.rows - 128; y += 5) {
+			for (int x = 0; x < resizedFrame.cols - 64; x += 5) {
+				cv::Rect roi(x, y, 64, 128);
+				cv::Mat patch = resizedFrame(roi);
 
-		for (int col = 0; col < colCell; col++) {
-			Point start(col * cellSize, row * cellSize);
+				// HOG 특징 벡터 계산
+				Mat descriptorMat;
+				noDup::hogFeatVec(patch, descriptorMat);
 
-			for (int y = 0; y < cellSize; y++) {
-				for (int x = 0; x < cellSize; x++) {
-					int pixelMag = in.data[2 * ((start.y + y) * in.cols + (start.x + x)) + 0];
-					int pixelAngle = in.data[2 * ((start.y + y) * in.cols + (start.x + x)) + 1];
+				// SVM 예측
+				float response = svm->predict(descriptorMat);
+				if (response == 1) {
+					// 원본 이미지의 크기에 맞게 박스 크기 조정
+					cv::Rect originalSizeBox(cvRound(x * scale), cvRound(y * scale), cvRound(64 * scale), cvRound(128 * scale));
+					detections.push_back(originalSizeBox);
+				}
+			}
+		}
 
-					int histIndex = pixelAngle / 20;
-					double rate = pixelAngle % 20 / 20.0;
+		// 이미지 크기 줄이기
+		scale *= 1.5;
+		cv::resize(resizedFrame, resizedFrame, cv::Size(), 1.0 / 1.2, 1.0 / 1.2);
+	}
 
-					if (histIndex < 0 || histIndex > 8) {
-						std::cerr << "histogramGradient - histogram index error\n";
-						return;
+	for (const auto& rect : detections) {
+		cv::rectangle(img, rect, cv::Scalar(0, 255, 0), 2);
+	}
+
+	// 결과 화면에 표시
+	cv::imshow("Person Detection", img);
+
+	cv::waitKey();
+}
+
+void objectDetect2(const Mat& testImage2) {
+	Ptr<SVM> svm = SVM::load("trained_svm.xml");
+
+	string path = "dataset/detect";
+	for (const auto& entry : fs::directory_iterator(path)) {
+		cout << '\n' << entry.path().string() << '\n';
+
+		double scaleFactor = 1.2;
+		double minScale = 0.7;  // 최소 스케일 (이미지 축소)
+		double maxScale = 1.3;  // 최대 스케일 (이미지 확대)
+
+		Mat testImage = imread(entry.path().string());
+
+		if (testImage.empty()) {
+			cout << "Can't Open file" << endl;
+			//continue;
+		}
+
+		vector<double> scales;
+		// 스케일 다운 (이미지 축소)
+		for (double scale = 1.0; scale >= minScale; scale /= scaleFactor) {
+			scales.push_back(scale);
+		}
+		// 스케일 업 (이미지 확대)
+		for (double scale = scaleFactor; scale <= maxScale; scale *= scaleFactor) {
+			scales.push_back(scale);
+		}
+
+		vector<Rect> detectedRects;
+
+		for (double currentScale : scales) {
+			Mat resizeImage;
+			resize(testImage, resizeImage, Size(), currentScale, currentScale);
+
+			cout << resizeImage.size() << '\n';
+
+			int height = resizeImage.rows;
+			int width = resizeImage.cols;
+
+			for (int h = 0; h < height - 128; h += 5) {
+				for (int w = 0; w < width - 64; w += 5) {
+					Rect range(w, h, 64, 128);
+					Mat scr = resizeImage(range);
+
+					Mat descriptorMat;
+					noDup::hogFeatVec(scr, descriptorMat);
+
+					float response = svm->predict(descriptorMat);
+					if (response == 1) {
+						int originalX = static_cast<int>(w / currentScale);
+						int originalY = static_cast<int>(h / currentScale);
+						int originalW = static_cast<int>(64 / currentScale);
+						int originalH = static_cast<int>(128 / currentScale);
+
+						detectedRects.push_back(Rect(originalX, originalY, originalW, originalH));
 					}
-
-					rowPtr[col * 9 + histIndex] += pixelMag * (1 - rate);
-					rowPtr[col * 9 + (histIndex + 1) % 9] += pixelMag * rate;
 				}
 			}
 		}
+
+		vector<int> weights;
+		groupRectangles(detectedRects, weights, 2, 0.3);
+
+		for (const auto& rect : detectedRects) {
+			rectangle(testImage, rect, Scalar(0, 255, 0), 2);
+		}
+
+		//cv::imshow("Person Detection", testImage);
+
+		//cv::waitKey();
+
+		string outputDir = "output";
+		fs::create_directories(outputDir);
+		string imageName = fs::path(entry.path()).filename().string();
+		string savePath = outputDir + "/" + imageName;
+		imwrite(savePath, testImage);
 	}
 }
 
-void histNormalize(Mat& in, Mat& out) {
-	if (in.type() != CV_16UC(9)) {
-		std::cerr << "histNormalization - input Mat type error\n";
+void svmTrain() {
+	std::string trainTrueFolder = "dataset/trainTrue";
+	std::string trainFalseFolder = "dataset/trainFalse";
+
+	Mat trainImg;
+	std::vector<int> label;
+
+	int fileCount = countFilesInDirectory(trainTrueFolder) + countFilesInDirectory(trainFalseFolder);
+	int index = 0, percentage = 0;
+
+	auto startHOG = std::chrono::high_resolution_clock::now();
+
+	for (const auto& entry : fs::directory_iterator(trainTrueFolder)) {
+		std::string filePath = entry.path().string();
+
+		Mat img = imread(filePath, IMREAD_COLOR);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			Mat hogFeature;
+			noDup::hogFeatVec(img, hogFeature);
+
+			trainImg.push_back(hogFeature);
+			label.push_back(1);
+
+			//Mat imgF, hogFeatureF;
+			//flip(img, imgF, 1);
+
+			//dup0::HOG(imgF, hogFeatureF);
+
+			//hogFeatureF = hogFeatureF.reshape(1, 1);
+
+			//trainImg.push_back(hogFeatureF);
+			//label.push_back(1);
+		} else {
+			std::cerr << filePath << " is not a valid image.\n";
+		}
+
+		if (++index >= (float)fileCount / 10 * percentage) {
+			std::cout << percentage++ * 10 << "% 완료\n";
+		} // 진행도 확인
+	}
+
+	for (const auto& entry : fs::directory_iterator(trainFalseFolder)) {
+		std::string filePath = entry.path().string();
+
+		Mat img = imread(filePath, IMREAD_COLOR);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			Mat hogFeature;
+
+			noDup::hog(img, hogFeature);
+
+			hogFeature = hogFeature.reshape(1, 1);
+
+			trainImg.push_back(hogFeature);
+			label.push_back(-1);
+		} else {
+			std::cerr << filePath << " is not a valid image.\n";
+		}
+
+		if (++index >= (float)fileCount / 10 * percentage) {
+			std::cout << percentage++ * 10 << "% 완료\n";
+		} // 진행도 확인
+	}
+
+	auto endHOG = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> durationHOG = endHOG - startHOG;
+
+	Mat trainLabel(label, true);
+	trainLabel = trainLabel.reshape(1, label.size());
+	trainLabel.convertTo(trainLabel, CV_32S);
+
+	// random shuffling
+	int seed = 42;  // 원하는 시드값
+	std::mt19937 rng(seed);  // Mersenne Twister 엔진 사용
+
+	// 인덱스 배열 생성
+	std::vector<int> indices(trainImg.rows);
+	for (int i = 0; i < trainImg.rows; ++i) {
+		indices[i] = i;
+	}
+	std::cout << "shuffling...\n";
+	// 인덱스를 무작위로 셔플링
+	std::shuffle(indices.begin(), indices.end(), rng);
+
+	// 셔플링된 인덱스를 사용하여 데이터와 라벨을 재배열
+	cv::Mat shuffledData(trainImg.size(), trainImg.type());
+	cv::Mat shuffledLabels(trainLabel.size(), trainLabel.type());
+
+	for (int i = 0; i < indices.size(); ++i) {
+		trainImg.row(indices[i]).copyTo(shuffledData.row(i));
+		trainLabel.row(indices[i]).copyTo(shuffledLabels.row(i));
+	}
+
+	// create SVM
+	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::create();
+	svm->setType(cv::ml::SVM::C_SVC);
+	svm->setKernel(cv::ml::SVM::LINEAR);
+	svm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::MAX_ITER, 1000, 1e-6));
+
+	auto startSVM = std::chrono::high_resolution_clock::now();
+
+	if (svm->train(shuffledData, cv::ml::ROW_SAMPLE, shuffledLabels)) {
+		svm->save("trained_svm.xml");
+		std::cout << "SVM 모델 학습 완료\n";
+	} else {
+		std::cerr << "SVM 학습 실패\n";
+	}
+
+	auto endSVM = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> durationSVM = endSVM - startSVM;
+
+	std::cout << std::endl;
+	std::cout << "학습 데이터 개수: " << fileCount << "\n";
+	std::cout << "HOG 실행 시간: " << durationHOG.count() << "초\n";
+	std::cout << "SVM 실행 시간: " << durationSVM.count() << "초\n\n";
+}
+
+void svmPred() {
+	std::string testTrueFolder = "dataset/testTrue";
+	std::string testFalseFolder = "dataset/testFalse";
+
+	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::load("trained_svm.xml");
+	if (svm.empty()) {
+		std::cerr << "Error: Could not load the SVM model.\n";
 		return;
 	}
 
-	out = Mat::zeros(in.rows, in.cols, CV_32FC(9));
+	int TP = 0, FN = 0, TN = 0, FP = 0;
 
-	ushort histogram[36] = { 0, };
+	auto startPred = std::chrono::high_resolution_clock::now();
 
-	for (int row = 0; row < in.rows - 1; row++) {
-		for (int col = 0; col < in.cols - 1; col++) {
-			ushort* inPtr1 = in.ptr<ushort>(row);
-			ushort* inPtr2 = in.ptr<ushort>(row + 1);
+	// true test data
+	for (const auto& entry : fs::directory_iterator(testTrueFolder)) {
+		std::string filePath = entry.path().string();
 
-			for (int i = 0; i < 18; i++) {
-				histogram[i] = inPtr1[col * 9 + i];
-				histogram[i + 18] = inPtr2[col * 9 + i];
-			}
+		cv::Mat img = cv::imread(filePath, cv::IMREAD_COLOR);
 
-			float sum = 0;
-			for (int i = 0; i < 36; i++) {
-				sum += histogram[i] * histogram[i];
-			}
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
 
-			if (sum == 0) {
-				std::cerr << "histNormalization - sum value error\n";
-				return;
-			}
+		if (!img.empty()) {
+			cv::Mat hogFeature;
 
-			float norm = sqrt(sum);
+			noDup::hog(img, hogFeature);
 
-			float* outPtr1 = out.ptr<float>(row);
-			float* outPtr2 = out.ptr<float>(row + 1);
+			hogFeature = hogFeature.reshape(1, 1); // 행 벡터로 변환
 
-			for (int i = 0; i < 18; i++) {
-				outPtr1[col * 9 + i] += histogram[i] / norm;
-				outPtr2[col * 9 + i] += histogram[i + 18] / norm;
-			}
+			// 예측 수행
+			float response = svm->predict(hogFeature);
+
+			// 예측 결과 출력
+			//std::cout << "File: " << filePath << " -> Prediction result: " << response << std::endl;
+
+			response == 1 ? TP++ : FN++;
+		} else {
+			std::cerr << "Error: Could not load or process image: " << filePath << std::endl;
 		}
 	}
 
-	for (int row = 0; row < out.rows; row++) {
-		float* outPtr = out.ptr<float>(row);
+	// false test data
+	for (const auto& entry : fs::directory_iterator(testFalseFolder)) {
+		std::string filePath = entry.path().string();
 
-		for (int col = 0; col < out.cols; col++) {
-			if ((row == 0 || row == out.rows - 1) && (col == 0 || col == out.cols - 1)) {
-				continue; // 꼭짓점
-			} else if (row == 0 || row == out.rows - 1 || col == 0 || col == out.cols - 1) {
-				for (int i = 0; i < 9; i++) {
-					outPtr[col * 9 + i] /= 2; // 가장자리
-				}
+		cv::Mat img = cv::imread(filePath, cv::IMREAD_COLOR);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			cv::Mat hogFeature;
+
+			noDup::hog(img, hogFeature);
+
+			hogFeature = hogFeature.reshape(1, 1); // 행 벡터로 변환
+
+			// 예측 수행
+			float response = svm->predict(hogFeature);
+
+			// 예측 결과 출력
+			//std::cout << "File: " << filePath << " -> Prediction result: " << response << std::endl;
+
+			//response == 1 ? TN++ : FP++;
+			if (response == 1) {
+				//std::cout << filePath << "\n";
+				FP++;
 			} else {
-				for (int i = 0; i < 9; i++) {
-					outPtr[col * 9 + i] /= 4; // 내부
-				}
+				TN++;
 			}
-		}
-	}
-}
-
-void polarToCartesian(Mat& in, Mat& out) {
-	if (in.type() != CV_8UC2) {
-		std::cerr << "polarToCartesian - input Mat type error\n";
-		return;
-	}
-
-	int rows = in.rows, cols = in.cols, channel = in.channels();
-	float xMax = 0, yMax = 0; // test
-
-	out = Mat::zeros(in.rows, in.cols, CV_32FC2);
-
-	for (int row = 0; row < rows; row++) {
-		float* outPtr = out.ptr<float>(row);
-
-		for (int col = 0; col < cols; col++) {
-			int pixelMag = in.data[channel * (row * in.cols + col) + 0];
-			int pixelAngle = in.data[channel * (row * in.cols + col) + 1];
-
-			outPtr[col * channel + 0] = pixelMag * cos(pixelAngle); // x
-			outPtr[col * channel + 1] = pixelMag * sin(pixelAngle); // y
-
-			xMax = max(abs(outPtr[col * channel + 0]), xMax);
-			yMax = max(abs(outPtr[col * channel + 1]), yMax);
+		} else {
+			std::cerr << "Error: Could not load or process image: " << filePath << std::endl;
 		}
 	}
 
-	// test - 시각화
+	auto endPred = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> durationPred = endPred - startPred;
 
-	xMax = floor(xMax + 0.5);
-	yMax = floor(yMax + 0.5);
+	std::cout << "TP: " << TP << "\n";
+	std::cout << "FN: " << FN << "\n";
+	std::cout << "TN: " << TN << "\n";
+	std::cout << "FP: " << FP << "\n\n";
+	std::cout << "SVM 예측 시간: " << durationPred.count() << "초\n\n";
+}
 
-	Mat plane = Mat::zeros(2 * yMax + 2, 2 * xMax + 2, CV_8UC1);
+int countFilesInDirectory(const std::string& folderPath) {
+	int fileCount = 0;
 
-	for (int row = 0; row < rows; row++) {
-		float* outPtr = out.ptr<float>(row);
-
-		for (int col = 0; col < cols; col++) {
-			int xPixel = floor(outPtr[col * channel + 0] + 0.5); // x
-			int yPixel = floor(outPtr[col * channel + 1] + 0.5); // y
-
-			xPixel += plane.cols / 2;
-			yPixel += plane.rows / 2;
-
-			uchar* pixelPtr = plane.ptr<uchar>(plane.rows - yPixel);
-			pixelPtr[xPixel]++;
+	// 폴더 내의 모든 항목을 순회
+	for (const auto& entry : fs::directory_iterator(folderPath)) {
+		// 디렉토리가 아닌 파일만 카운트
+		if (fs::is_regular_file(entry.status())) {
+			++fileCount;
 		}
 	}
 
-	Mat planeGamma = gammaCorrection(plane, 0.1);
-
-	imshow("plane", plane);
-	imshow("gamma", planeGamma);
+	return fileCount;
 }
 
-Mat gammaCorrection(const cv::Mat& input, double gamma) {
-	// Look Up Table 생성
-	cv::Mat lut(1, 256, CV_8UC1);
-	for (int i = 0; i < 256; ++i) {
-		lut.at<uchar>(i) = cv::saturate_cast<uchar>(pow(i / 255.0, gamma) * 255.0);
-	}
+void addGaussianNoise(const cv::Mat& src, cv::Mat& dst, double mean, double stddev) {
+	cv::Mat noise = cv::Mat(src.size(), src.type());
 
-	cv::Mat output;
-	cv::LUT(input, lut, output); // LUT을 사용하여 변환
-	return output;
+	// 가우시안 노이즈 생성
+	cv::randn(noise, mean, stddev);
+
+	// 원본 영상에 노이즈 추가
+	cv::add(src, noise, dst);
+
+	// 결과 영상이 8비트일 경우 값 클리핑 (0 ~ 255)
+	dst.convertTo(dst, CV_8U);
 }
-
-// Mat 타입
