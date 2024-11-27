@@ -132,7 +132,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="hog.cpp" />
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="main.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="hog.hpp" />

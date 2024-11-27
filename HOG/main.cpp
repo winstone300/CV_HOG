@@ -11,40 +11,382 @@ using namespace cv;
 using namespace cv::ml;
 namespace fs = std::filesystem;
 
+void objectDetect(string filePath);
+
+void svmTrain(string svm_name);
+void svmPred(string svm_name);
 void objectDetect1(const Mat& img);
 void objectDetect2(const Mat& testImage);
-void svmTrain();
-void svmPred();
 
-int countFilesInDirectory(const std::string& folderPath);
-void addGaussianNoise(const cv::Mat& src, cv::Mat& dst, double mean, double stddev);
+int countFilesInDirectory(const string& folderPath);
+void addGaussianNoise(const Mat& src, Mat& dst, double mean, double stddev);
+
+bool MY_HOG = true; // false = opencv HOGDescriptor
+bool TRAIN_FLIP = true;
+bool SAVE_FALSE_PRED = false;
+HOGDescriptor hog(Size(64, 128), Size(16, 16), Size(8, 8), Size(8, 8), 9);
 
 int main() {
-	//svmTrain();
-	//svmPred();
-	//return 0;
-
-	Mat temp;
-
-	objectDetect2(temp);
-
+	//svmTrain("new_trained_svm.xml");
+	svmPred("trained_svm_my.xml");
 	return 0;
 
-	//VideoCapture video("vtest.avi");
+	string path = "detection";
 
-	//int index = 0;
+	for (const auto& entry : fs::directory_iterator(path)) {
+		objectDetect(entry.path().string());
+	}
 
-	//while (1) {
-	//	cout << "frame: " << index++ << "\n";
-	//	Mat frame;
-	//	video >> frame;
+	//objectDetect1(img);
+	//objectDetect2(Mat());
 
-	//	if (frame.empty()) {
-	//		break;
-	//	}
+	return 0;
+}
 
-	//	objectDetect2(frame);
-	//}
+void objectDetect(string filePath) {
+	cout << filePath << endl;
+
+	Mat image = imread(filePath, IMREAD_GRAYSCALE);
+	Mat imageColor = imread(filePath);
+	if (image.empty()) {
+		cerr << "이미지를 불러올 수 없습니다!" << endl;
+		return;
+	}
+
+	// 가우시안 피라미드 파라미터
+	double scaleFactor = 1.25; // 피라미드 스케일
+	int levels = 5; // 피라미드 레벨 수
+
+	// SVM 및 HOG 설정
+	Ptr<SVM> svm = SVM::load("trained_svm.xml"); // 학습된 SVM 모델 로드
+	Size winSize(64, 128); // 윈도우 크기 (예: 사람 검출 기준)
+	Size stepSize(8, 16); // 슬라이딩 윈도우 스텝 크기
+
+	vector<Rect> allDetections;
+
+	// 가우시안 피라미드를 사용하여 다중 스케일 검출 수행
+	Mat currentImage = image.clone();
+	for (int i = 0; i < levels; ++i) {
+		cout << currentImage.size() << endl;
+		// 객체 검출
+		vector<Rect> detections;
+
+		for (int y = 0; y <= image.rows - winSize.height; y += stepSize.height) {
+			for (int x = 0; x <= image.cols - winSize.width; x += stepSize.width) {
+				// 슬라이딩 윈도우 영역 추출
+				Rect window(x, y, winSize.width, winSize.height);
+				Mat roi = image(window);
+
+				Mat descriptorMat;
+				if (MY_HOG) {
+					noDup::hogFeatVec(roi, descriptorMat);
+				} else {
+					vector<float> featureVec;
+					hog.compute(roi, featureVec);
+					Mat temp(featureVec);
+					temp = temp.reshape(1, 1);
+					descriptorMat = temp.clone();
+				}
+
+				float response = svm->predict(descriptorMat);
+
+				if (response == 1) {
+					detections.push_back(window);
+				}
+			}
+		}
+
+		// 원본 이미지 스케일로 변환 후 결과 저장
+		for (auto& rect : detections) {
+			Rect scaledRect(rect.x * pow(scaleFactor, i),
+				rect.y * pow(scaleFactor, i),
+				rect.width * pow(scaleFactor, i),
+				rect.height * pow(scaleFactor, i));
+			allDetections.push_back(scaledRect);
+		}
+
+		// 가우시안 피라미드 다운스케일
+		resize(currentImage, currentImage, Size(), 1.0 / scaleFactor, 1.0 / scaleFactor);
+	}
+
+	vector<int> weights; // 각 사각형의 검출 빈도
+	int groupThreshold = 5; // 최소 그룹화 임계값
+	double eps = 0.2; // 크기 차이에 따른 그룹화 허용 오차
+	groupRectangles(allDetections, weights, groupThreshold, eps);
+
+	// 검출된 결과 출력
+	for (auto& rect : allDetections) {
+		rectangle(imageColor, rect, Scalar(0, 0, 255), 2);
+	}
+
+	string outputDir = "output";
+	fs::create_directories(outputDir);
+	string savePath = outputDir + "/" + fs::path(filePath).filename().string();
+	imwrite(savePath, imageColor);
+
+	// 결과 이미지 표시
+	//imshow("Detections", imageColor);
+	//waitKey(0);
+}
+
+void svmTrain(string svm_name) {
+	string trainTrueFolder = "dataset/trainTrue";
+	string trainFalseFolder = "dataset/trainFalse";
+
+	Mat trainImg;
+	vector<int> label;
+
+	int trueFileCount = countFilesInDirectory(trainTrueFolder);
+	int falseFileCount = countFilesInDirectory(trainFalseFolder);
+	int fileCount = trueFileCount + falseFileCount;
+	int index = 0, percentage = 0;
+
+	auto startHOG = std::chrono::high_resolution_clock::now();
+
+	for (const auto& entry : fs::directory_iterator(trainTrueFolder)) {
+		string filePath = entry.path().string();
+
+		//Mat img = imread(filePath, IMREAD_COLOR);
+		Mat img = imread(filePath, IMREAD_GRAYSCALE);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			if (MY_HOG) {
+				Mat hogFeature;
+				noDup::hogFeatVec(img, hogFeature);
+
+				trainImg.push_back(hogFeature);
+				label.push_back(1);
+			} else {
+				vector<float> featureVec;
+				hog.compute(img, featureVec);
+				Mat temp(featureVec);
+				temp = temp.reshape(1, 1);
+				trainImg.push_back(temp);
+				label.push_back(1);
+			}
+
+			if (TRAIN_FLIP) { // train flip
+				Mat imgF, hogFeatureF;
+				flip(img, imgF, 1);
+				noDup::hogFeatVec(imgF, hogFeatureF);
+
+				trainImg.push_back(hogFeatureF);
+				label.push_back(1);
+			}
+		} else {
+			cerr << filePath << " is not a valid image.\n";
+		}
+
+		if (++index >= (float)fileCount / 10 * percentage) {
+			cout << percentage++ * 10 << "% 완료\n";
+		} // 진행도 확인
+	}
+
+	for (const auto& entry : fs::directory_iterator(trainFalseFolder)) {
+		string filePath = entry.path().string();
+
+		Mat img = imread(filePath, IMREAD_COLOR);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			if (MY_HOG) {
+				Mat hogFeature;
+				noDup::hogFeatVec(img, hogFeature);
+
+				trainImg.push_back(hogFeature);
+				label.push_back(-1);
+			} else {
+				vector<float> featureVec;
+				hog.compute(img, featureVec);
+				Mat temp(featureVec);
+				temp = temp.reshape(1, 1);
+				trainImg.push_back(temp);
+				label.push_back(-1);
+			}
+		} else {
+			cerr << filePath << " is not a valid image.\n";
+		}
+
+		if (++index >= (float)fileCount / 10 * percentage) {
+			cout << percentage++ * 10 << "% 완료\n";
+		} // 진행도 확인
+	}
+
+	auto endHOG = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> durationHOG = endHOG - startHOG;
+
+	Mat trainLabel(label, true);
+	trainLabel = trainLabel.reshape(1, label.size());
+	trainLabel.convertTo(trainLabel, CV_32S);
+
+	// random shuffling
+	int seed = 42;  // 원하는 시드값
+	std::mt19937 rng(seed);  // Mersenne Twister 엔진 사용
+
+	// 인덱스 배열 생성
+	vector<int> indices(trainImg.rows);
+	for (int i = 0; i < trainImg.rows; ++i) {
+		indices[i] = i;
+	}
+	cout << "shuffling...\n";
+	// 인덱스를 무작위로 셔플링
+	shuffle(indices.begin(), indices.end(), rng);
+
+	// 셔플링된 인덱스를 사용하여 데이터와 라벨을 재배열
+	Mat shuffledData(trainImg.size(), trainImg.type());
+	Mat shuffledLabels(trainLabel.size(), trainLabel.type());
+
+	for (int i = 0; i < indices.size(); ++i) {
+		trainImg.row(indices[i]).copyTo(shuffledData.row(i));
+		trainLabel.row(indices[i]).copyTo(shuffledLabels.row(i));
+	}
+
+	// create SVM
+	Ptr<SVM> svm = SVM::create();
+	svm->setType(SVM::C_SVC);
+	svm->setKernel(SVM::LINEAR);
+	svm->setC(1.0);
+	svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 1000, 1e-6));
+
+	auto startSVM = std::chrono::high_resolution_clock::now();
+
+	if (svm->train(shuffledData, ROW_SAMPLE, shuffledLabels)) {
+		svm->save(svm_name);
+		cout << "SVM 모델 학습 완료\n";
+	} else {
+		cerr << "SVM 학습 실패\n";
+	}
+
+	auto endSVM = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> durationSVM = endSVM - startSVM;
+
+	cout << endl;
+	cout << "학습 데이터 개수: " << fileCount << "\n";
+	cout << "양성 학습 데이터 개수: " << trueFileCount << "\n";
+	cout << "좌우 반전 추가: " << (TRAIN_FLIP ? "true" : "false") << "\n";
+	cout << "음성 학습 데이터 개수: " << falseFileCount << "\n";
+	cout << "HOG 실행 시간: " << durationHOG.count() << "초\n";
+	cout << "SVM 실행 시간: " << durationSVM.count() << "초\n\n";
+}
+
+void svmPred(string svm_name) {
+	string testTrueFolder = "dataset/testTrue";
+	string testFalseFolder = "dataset/testFalse";
+
+	Ptr<SVM> svm = SVM::load(svm_name);
+	if (svm.empty()) {
+		cerr << "Error: Could not load the SVM model.\n";
+		return;
+	}
+
+	int TP = 0, FN = 0, TN = 0, FP = 0;
+
+	auto startPred = std::chrono::high_resolution_clock::now();
+
+	// true test data
+	for (const auto& entry : fs::directory_iterator(testTrueFolder)) {
+		string filePath = entry.path().string();
+
+		//Mat img = imread(filePath, IMREAD_COLOR);
+		Mat img = imread(filePath, IMREAD_GRAYSCALE);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			Mat hogFeature;
+			if (MY_HOG) {
+				noDup::hogFeatVec(img, hogFeature);
+			} else {
+				vector<float> featureVec;
+				hog.compute(img, featureVec);
+				Mat temp(featureVec);
+				temp = temp.reshape(1, 1);
+				hogFeature = temp.clone();
+			}
+
+			// 예측 수행
+			float response = svm->predict(hogFeature);
+
+			// 예측 결과 출력
+			//cout << "File: " << filePath << " -> Prediction result: " << response << endl;
+
+			//response == 1 ? TP++ : FN++;
+			if (response == 1) {
+				TP++;
+			} else {
+				if (SAVE_FALSE_PRED) {
+					cout << filePath << "\n";
+					string savePath = "FN/" + fs::path(filePath).filename().string();
+					imwrite(savePath, img);
+				}
+				FN++;
+			}
+		} else {
+			cerr << "Error: Could not load or process image: " << filePath << endl;
+		}
+	}
+
+	// false test data
+	for (const auto& entry : fs::directory_iterator(testFalseFolder)) {
+		string filePath = entry.path().string();
+
+		Mat img = imread(filePath, IMREAD_COLOR);
+
+		if (img.rows != 128 || img.cols != 64) {
+			resize(img, img, Size(64, 128));
+		}
+
+		if (!img.empty()) {
+			Mat hogFeature;
+			if (MY_HOG) {
+				noDup::hogFeatVec(img, hogFeature);
+			} else {
+				vector<float> featureVec;
+				hog.compute(img, featureVec);
+				Mat temp(featureVec);
+				temp = temp.reshape(1, 1);
+				hogFeature = temp.clone();
+			}
+
+			// 예측 수행
+			float response = svm->predict(hogFeature);
+
+			// 예측 결과 출력
+			//cout << "File: " << filePath << " -> Prediction result: " << response << endl;
+
+			//response == 1 ? TN++ : FP++;
+			if (response == 1) {
+				if (SAVE_FALSE_PRED) {
+					cout << filePath << "\n";
+					string savePath = "FP/" + fs::path(filePath).filename().string();
+					imwrite(savePath, img);
+				}
+				FP++;
+			} else {
+				TN++;
+			}
+		} else {
+			cerr << "Error: Could not load or process image: " << filePath << endl;
+		}
+	}
+
+	auto endPred = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> durationPred = endPred - startPred;
+
+	cout << "TP: " << TP << "\n";
+	cout << "FN: " << FN << "\n";
+	cout << "TN: " << TN << "\n";
+	cout << "FP: " << FP << "\n\n";
+	cout << "SVM 예측 시간: " << durationPred.count() << "초\n\n";
 }
 
 // 내가 만들었던거
@@ -88,7 +430,7 @@ void objectDetect1(const Mat& img) {
 		}
 
 		// 이미지 크기 줄이기
-		scale *= 1.5;
+		scale *= 1.2;
 		cv::resize(resizedFrame, resizedFrame, cv::Size(), 1.0 / 1.2, 1.0 / 1.2);
 	}
 
@@ -109,7 +451,7 @@ void objectDetect2(const Mat& testImage2) {
 	for (const auto& entry : fs::directory_iterator(path)) {
 		cout << '\n' << entry.path().string() << '\n';
 
-		double scaleFactor = 1.2;
+		double scaleFactor = 2;
 		double minScale = 0.7;  // 최소 스케일 (이미지 축소)
 		double maxScale = 1.3;  // 최대 스케일 (이미지 확대)
 
@@ -169,230 +511,16 @@ void objectDetect2(const Mat& testImage2) {
 			rectangle(testImage, rect, Scalar(0, 255, 0), 2);
 		}
 
-		//cv::imshow("Person Detection", testImage);
+		cv::imshow("Person Detection", testImage);
 
-		//cv::waitKey();
+		cv::waitKey();
 
-		string outputDir = "output";
-		fs::create_directories(outputDir);
-		string imageName = fs::path(entry.path()).filename().string();
-		string savePath = outputDir + "/" + imageName;
-		imwrite(savePath, testImage);
+		//string outputDir = "output";
+		//fs::create_directories(outputDir);
+		//string imageName = fs::path(entry.path()).filename().string();
+		//string savePath = outputDir + "/" + imageName;
+		//imwrite(savePath, testImage);
 	}
-}
-
-void svmTrain() {
-	std::string trainTrueFolder = "dataset/trainTrue";
-	std::string trainFalseFolder = "dataset/trainFalse";
-
-	Mat trainImg;
-	std::vector<int> label;
-
-	int fileCount = countFilesInDirectory(trainTrueFolder) + countFilesInDirectory(trainFalseFolder);
-	int index = 0, percentage = 0;
-
-	auto startHOG = std::chrono::high_resolution_clock::now();
-
-	for (const auto& entry : fs::directory_iterator(trainTrueFolder)) {
-		std::string filePath = entry.path().string();
-
-		Mat img = imread(filePath, IMREAD_COLOR);
-
-		if (img.rows != 128 || img.cols != 64) {
-			resize(img, img, Size(64, 128));
-		}
-
-		if (!img.empty()) {
-			Mat hogFeature;
-			noDup::hogFeatVec(img, hogFeature);
-
-			trainImg.push_back(hogFeature);
-			label.push_back(1);
-
-			//Mat imgF, hogFeatureF;
-			//flip(img, imgF, 1);
-
-			//dup0::HOG(imgF, hogFeatureF);
-
-			//hogFeatureF = hogFeatureF.reshape(1, 1);
-
-			//trainImg.push_back(hogFeatureF);
-			//label.push_back(1);
-		} else {
-			std::cerr << filePath << " is not a valid image.\n";
-		}
-
-		if (++index >= (float)fileCount / 10 * percentage) {
-			std::cout << percentage++ * 10 << "% 완료\n";
-		} // 진행도 확인
-	}
-
-	for (const auto& entry : fs::directory_iterator(trainFalseFolder)) {
-		std::string filePath = entry.path().string();
-
-		Mat img = imread(filePath, IMREAD_COLOR);
-
-		if (img.rows != 128 || img.cols != 64) {
-			resize(img, img, Size(64, 128));
-		}
-
-		if (!img.empty()) {
-			Mat hogFeature;
-
-			noDup::hog(img, hogFeature);
-
-			hogFeature = hogFeature.reshape(1, 1);
-
-			trainImg.push_back(hogFeature);
-			label.push_back(-1);
-		} else {
-			std::cerr << filePath << " is not a valid image.\n";
-		}
-
-		if (++index >= (float)fileCount / 10 * percentage) {
-			std::cout << percentage++ * 10 << "% 완료\n";
-		} // 진행도 확인
-	}
-
-	auto endHOG = std::chrono::high_resolution_clock::now();
-	std::chrono::duration<double> durationHOG = endHOG - startHOG;
-
-	Mat trainLabel(label, true);
-	trainLabel = trainLabel.reshape(1, label.size());
-	trainLabel.convertTo(trainLabel, CV_32S);
-
-	// random shuffling
-	int seed = 42;  // 원하는 시드값
-	std::mt19937 rng(seed);  // Mersenne Twister 엔진 사용
-
-	// 인덱스 배열 생성
-	std::vector<int> indices(trainImg.rows);
-	for (int i = 0; i < trainImg.rows; ++i) {
-		indices[i] = i;
-	}
-	std::cout << "shuffling...\n";
-	// 인덱스를 무작위로 셔플링
-	std::shuffle(indices.begin(), indices.end(), rng);
-
-	// 셔플링된 인덱스를 사용하여 데이터와 라벨을 재배열
-	cv::Mat shuffledData(trainImg.size(), trainImg.type());
-	cv::Mat shuffledLabels(trainLabel.size(), trainLabel.type());
-
-	for (int i = 0; i < indices.size(); ++i) {
-		trainImg.row(indices[i]).copyTo(shuffledData.row(i));
-		trainLabel.row(indices[i]).copyTo(shuffledLabels.row(i));
-	}
-
-	// create SVM
-	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::create();
-	svm->setType(cv::ml::SVM::C_SVC);
-	svm->setKernel(cv::ml::SVM::LINEAR);
-	svm->setTermCriteria(cv::TermCriteria(cv::TermCriteria::MAX_ITER, 1000, 1e-6));
-
-	auto startSVM = std::chrono::high_resolution_clock::now();
-
-	if (svm->train(shuffledData, cv::ml::ROW_SAMPLE, shuffledLabels)) {
-		svm->save("trained_svm.xml");
-		std::cout << "SVM 모델 학습 완료\n";
-	} else {
-		std::cerr << "SVM 학습 실패\n";
-	}
-
-	auto endSVM = std::chrono::high_resolution_clock::now();
-	std::chrono::duration<double> durationSVM = endSVM - startSVM;
-
-	std::cout << std::endl;
-	std::cout << "학습 데이터 개수: " << fileCount << "\n";
-	std::cout << "HOG 실행 시간: " << durationHOG.count() << "초\n";
-	std::cout << "SVM 실행 시간: " << durationSVM.count() << "초\n\n";
-}
-
-void svmPred() {
-	std::string testTrueFolder = "dataset/testTrue";
-	std::string testFalseFolder = "dataset/testFalse";
-
-	cv::Ptr<cv::ml::SVM> svm = cv::ml::SVM::load("trained_svm.xml");
-	if (svm.empty()) {
-		std::cerr << "Error: Could not load the SVM model.\n";
-		return;
-	}
-
-	int TP = 0, FN = 0, TN = 0, FP = 0;
-
-	auto startPred = std::chrono::high_resolution_clock::now();
-
-	// true test data
-	for (const auto& entry : fs::directory_iterator(testTrueFolder)) {
-		std::string filePath = entry.path().string();
-
-		cv::Mat img = cv::imread(filePath, cv::IMREAD_COLOR);
-
-		if (img.rows != 128 || img.cols != 64) {
-			resize(img, img, Size(64, 128));
-		}
-
-		if (!img.empty()) {
-			cv::Mat hogFeature;
-
-			noDup::hog(img, hogFeature);
-
-			hogFeature = hogFeature.reshape(1, 1); // 행 벡터로 변환
-
-			// 예측 수행
-			float response = svm->predict(hogFeature);
-
-			// 예측 결과 출력
-			//std::cout << "File: " << filePath << " -> Prediction result: " << response << std::endl;
-
-			response == 1 ? TP++ : FN++;
-		} else {
-			std::cerr << "Error: Could not load or process image: " << filePath << std::endl;
-		}
-	}
-
-	// false test data
-	for (const auto& entry : fs::directory_iterator(testFalseFolder)) {
-		std::string filePath = entry.path().string();
-
-		cv::Mat img = cv::imread(filePath, cv::IMREAD_COLOR);
-
-		if (img.rows != 128 || img.cols != 64) {
-			resize(img, img, Size(64, 128));
-		}
-
-		if (!img.empty()) {
-			cv::Mat hogFeature;
-
-			noDup::hog(img, hogFeature);
-
-			hogFeature = hogFeature.reshape(1, 1); // 행 벡터로 변환
-
-			// 예측 수행
-			float response = svm->predict(hogFeature);
-
-			// 예측 결과 출력
-			//std::cout << "File: " << filePath << " -> Prediction result: " << response << std::endl;
-
-			//response == 1 ? TN++ : FP++;
-			if (response == 1) {
-				//std::cout << filePath << "\n";
-				FP++;
-			} else {
-				TN++;
-			}
-		} else {
-			std::cerr << "Error: Could not load or process image: " << filePath << std::endl;
-		}
-	}
-
-	auto endPred = std::chrono::high_resolution_clock::now();
-	std::chrono::duration<double> durationPred = endPred - startPred;
-
-	std::cout << "TP: " << TP << "\n";
-	std::cout << "FN: " << FN << "\n";
-	std::cout << "TN: " << TN << "\n";
-	std::cout << "FP: " << FP << "\n\n";
-	std::cout << "SVM 예측 시간: " << durationPred.count() << "초\n\n";
 }
 
 int countFilesInDirectory(const std::string& folderPath) {

@@ -131,7 +131,7 @@ void noDup::gradient(const Mat& in, Mat& out, int padSize) {
 	delete[] pixelValue;
 
 #pragma region deprecated_colorGradient
-	// 컬러 영상에서만 작동
+	// only color mat
 	//for (int y = 0; y < row; y++) {
 	//	for (int x = 0; x < col; x++) {
 	//		int c = -1;
@@ -256,14 +256,14 @@ void noDup::histNormalize(const Mat& in, Mat& out) {
 
 		for (int col = 0; col < out.cols; col++) {
 			if ((row == 0 || row == out.rows - 1) && (col == 0 || col == out.cols - 1)) {
-				continue; // 꼭짓점
+				continue; // vertex
 			} else if (row == 0 || row == out.rows - 1 || col == 0 || col == out.cols - 1) {
 				for (int i = 0; i < 9; i++) {
-					outPtr[col * 9 + i] /= 2; // 가장자리
+					outPtr[col * 9 + i] /= 2; // edge
 				}
 			} else {
 				for (int i = 0; i < 9; i++) {
-					outPtr[col * 9 + i] /= 4; // 내부
+					outPtr[col * 9 + i] /= 4; // inside
 				}
 			}
 		}
