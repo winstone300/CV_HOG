@@ -1,5 +1,6 @@
 # Visual Studio 설정 폴더 제외
 .vs/
 dataset/
+detection/
 output/
 *.xml
